@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #000;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+            background-color: #4ec0ca;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas" width="288" height="512"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Base URL for the raw assets from the GitHub repository
+        const assetBase = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/";
+
+        // Game States
+        const STATE_START = 0;
+        const STATE_PLAYING = 1;
+        const STATE_GAMEOVER = 2;
+        let gameState = STATE_START;
+
+        // Image Asset Loader
+        const images = {};
+        const assetNames = [
+            "background-day", "base", "pipe-green", "gameover", "message",
+            "yellowbird-downflap", "yellowbird-midflap", "yellowbird-upflap",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+        ];
+
+        let assetsLoaded = 0;
+        assetNames.forEach(name => {
+            images[name] = new Image();
+            images[name].src = `${assetBase}${name}.png`;
+            images[name].onload = () => {
+                assetsLoaded++;
+                if (assetsLoaded === assetNames.length) {
+                    initGame();
+                }
+            };
+        });
+
+        // Game Variables
+        let bird = {};
+        let pipes = [];
+        let baseScrollX = 0;
+        let score = 0;
+        let frameCount = 0;
+
+        // Physics Constants
+        const GRAVITY = 0.25;
+        const JUMP = -5.3;
+        const PIPE_SPEED = 2;
+        const PIPE_SPAWN_RATE = 100; // frames
+        const PIPE_GAP = 100;
+        const BASE_Y = 400; // Y coordinate where the ground base sits
+
+        function initGame() {
+            bird = {
+                x: 50,
+                y: 150,
+                velocity: 0,
+                width: 34,
+                height: 24,
+                animationFrame: 0,
+                sprites: [images["yellowbird-downflap"], images["yellowbird-midflap"], images["yellowbird-upflap"]]
+            };
+            pipes = [];
+            score = 0;
+            gameState = STATE_START;
+            
+            // Start the main game loop
+            if (frameCount === 0) {
+                requestAnimationFrame(update);
+            }
+        }
+
+        function resetToPlay() {
+            bird.y = 150;
+            bird.velocity = 0;
+            pipes = [];
+            score = 0;
+            gameState = STATE_PLAYING;
+        }
+
+        // Input Listeners
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "Space" || e.code === "ArrowUp") {
+                handleAction();
+            }
+        });
+
+        canvas.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            handleAction();
+        });
+
+        canvas.addEventListener("mousedown", (e) => {
+            if (e.button === 0) { // Left click
+                handleAction();
+            }
+        });
+
+        function handleAction() {
+            if (gameState === STATE_START) {
+                gameState = STATE_PLAYING;
+                bird.velocity = JUMP;
+            } else if (gameState === STATE_PLAYING) {
+                bird.velocity = JUMP;
+            } else if (gameState === STATE_GAMEOVER) {
+                initGame();
+            }
+        }
+
+        // Collision Helper
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // Main Loop
+        function update() {
+            frameCount++;
+
+            // --- 1. LOGIC UPDATES ---
+            if (gameState === STATE_PLAYING) {
+                // Apply Gravity
+                bird.velocity += GRAVITY;
+                bird.y += bird.velocity;
+
+                // Bird Animation Flaps
+                if (frameCount % 5 === 0) {
+                    bird.animationFrame = (bird.animationFrame + 1) % 3;
+                }
+
+                // Move Floor Base
+                baseScrollX = (baseScrollX - PIPE_SPEED) % 48;
+
+                // Spawn Pipes
+                if (frameCount % PIPE_SPAWN_RATE === 0) {
+                    // Randomize the top pipe's bottom edge position
+                    const minTopPipeHeight = 50;
+                    const maxTopPipeHeight = BASE_Y - PIPE_GAP - 50;
+                    const topPipeBottomY = Math.floor(Math.random() * (maxTopPipeHeight - minTopPipeHeight + 1)) + minTopPipeHeight;
+
+                    pipes.push({
+                        x: canvas.width,
+                        topHeight: topPipeBottomY,
+                        width: 52,
+                        height: 320, // Height of the pipe texture
+                        passed: false
+                    });
+                }
+
+                // Move and manage pipes
+                for (let i = pipes.length - 1; i >= 0; i--) {
+                    pipes[i].x -= PIPE_SPEED;
+
+                    // Hitboxes
+                    const birdBox = { x: bird.x + 2, y: bird.y + 2, width: bird.width - 4, height: bird.height - 4 };
+                    const topPipeBox = { x: pipes[i].x, y: pipes[i].topHeight - pipes[i].height, width: pipes[i].width, height: pipes[i].height };
+                    const bottomPipeBox = { x: pipes[i].x, y: pipes[i].topHeight + PIPE_GAP, width: pipes[i].width, height: BASE_Y - (pipes[i].topHeight + PIPE_GAP) };
+
+                    // Collision Check
+                    if (checkCollision(birdBox, topPipeBox) || checkCollision(birdBox, bottomPipeBox)) {
+                        gameState = STATE_GAMEOVER;
+                    }
+
+                    // Score Increment Tracking
+                    if (!pipes[i].passed && pipes[i].x + pipes[i].width < bird.x) {
+                        pipes[i].passed = true;
+                        score++;
+                    }
+
+                    // Remove off-screen pipes
+                    if (pipes[i].x + pipes[i].width < 0) {
+                        pipes.splice(i, 1);
+                    }
+                }
+
+                // Ground and Ceiling Collisions
+                if (bird.y + bird.height >= BASE_Y || bird.y <= 0) {
+                    gameState = STATE_GAMEOVER;
+                }
+            }
+
+            // --- 2. RENDERING ---
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Background (Static)
+            ctx.drawImage(images["background-day"], 0, 0);
+
+            // Draw Pipes
+            pipes.forEach(p => {
+                // Top Pipe (Requires flipping texture vertically)
+                ctx.save();
+                ctx.translate(p.x + p.width / 2, p.topHeight - p.height / 2);
+                ctx.scale(1, -1);
+                ctx.drawImage(images["pipe-green"], -p.width / 2, -p.height / 2);
+                ctx.restore();
+
+                // Bottom Pipe
+                ctx.drawImage(images["pipe-green"], p.x, p.topHeight + PIPE_GAP);
+            });
+
+            // Draw Base Moving Ground
+            // Renders two ground segments stitched together to create a continuous scroll effect
+            ctx.drawImage(images["base"], baseScrollX, BASE_Y);
+            ctx.drawImage(images["base"], baseScrollX + 288, BASE_Y);
+
+            // Draw Bird
+            let currentBirdSprite = bird.sprites[bird.animationFrame] || bird.sprites[1];
+            ctx.save();
+            ctx.translate(bird.x + bird.width / 2, bird.y + bird.height / 2);
+            
+            // Rotate bird based on velocity
+            let rotation = bird.velocity * 0.05;
+            if (rotation > 0.5) rotation = 0.5;
+            if (rotation < -0.3) rotation = -0.3;
+            ctx.rotate(rotation);
+            
+            ctx.drawImage(currentBirdSprite, -bird.width / 2, -bird.height / 2);
+            ctx.restore();
+
+            // Draw Score Counter using Assets
+            if (gameState !== STATE_START) {
+                drawScore();
+            }
+
+            // Draw State Screen Overlays
+            if (gameState === STATE_START) {
+                // Intro message graphic
+                const msgW = 184;
+                const msgH = 267;
+                ctx.drawImage(images["message"], (canvas.width - msgW) / 2, (BASE_Y - msgH) / 2);
+            } else if (gameState === STATE_GAMEOVER) {
+                // Game Over graphic
+                const goW = 192;
+                const goH = 42;
+                ctx.drawImage(images["gameover"], (canvas.width - goW) / 2, (BASE_Y - goH) / 2);
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        function drawScore() {
+            const scoreStr = score.toString();
+            let totalWidth = 0;
+            
+            // Calculate total width of digits
+            for (let i = 0; i < scoreStr.length; i++) {
+                let digitImg = images[scoreStr[i]];
+                if (digitImg) totalWidth += digitImg.width;
+            }
+
+            // Draw centered digits
+            let currentX = (canvas.width - totalWidth) / 2;
+            for (let i = 0; i < scoreStr.length; i++) {
+                let digitImg = images[scoreStr[i]];
+                if (digitImg) {
+                    ctx.drawImage(digitImg, currentX, 30);
